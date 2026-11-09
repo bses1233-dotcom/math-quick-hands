@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>乘法快手：單人衝刺與雙人對戰</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- canvas-confetti 綵帶特效 -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            p1: '#3B82F6',
+            p2: '#EC4899',
+            primary: '#16A34A',
+            accent: '#E11D48',
+          }
+        }
+      }
+    }
+  </script>
+
+  <style>
+    * {
+      touch-action: manipulation; /* 防止雙擊放大 */
+      -webkit-tap-highlight-color: transparent;
+    }
+    body {
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    .view-card {
+      box-shadow: 0 10px 25px rgba(0,0,0,0.06);
+    }
+    /* 按鈕點擊動畫 */
+    .active-press:active { transform: translateY(4px); box-shadow: none !important; }
+    
+    /* 雙人模式專屬 P1 旋轉 */
+    .rotate-180-p1 { transform: rotate(180deg); }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col items-center p-3 font-sans">
+
+  <!-- 主選單 -->
+  <div id="menuView" class="view-card w-full max-w-lg bg-white rounded-3xl p-6 text-center mt-4">
+    <h1 class="text-3xl font-black mb-1">🪰 乘法蒼蠅拍大作戰</h1>
+    <p class="text-slate-500 mb-4">挑選練習段落：</p>
+    
+    <div class="grid grid-cols-4 gap-3 mb-4" id="factorSelector"></div>
+
+    <div class="flex gap-2 justify-center mb-6">
+      <button class="bg-slate-100 border-2 border-slate-300 text-slate-700 font-bold py-1.5 px-4 rounded-xl text-sm active-press" onclick="setPreset([3,6,7,9])">3,6,7,9 專攻</button>
+      <button class="bg-slate-100 border-2 border-slate-300 text-slate-700 font-bold py-1.5 px-4 rounded-xl text-sm active-press" onclick="selectAll()">全選 2~9</button>
+    </div>
+
+    <button class="w-full bg-green-600 text-white font-black text-xl py-4 rounded-2xl mb-3 shadow-[0_5px_0_#15803D] active-press transition-transform" onclick="startSoloMode()">⏱️ 單人 60 秒衝刺</button>
+    <button class="w-full bg-blue-500 text-white font-black text-xl py-4 rounded-2xl shadow-[0_5px_0_#1D4ED8] active-press transition-transform" onclick="startBattleMode()">⚔️ 雙人面對面搶答 (搶5分)</button>
+
+    <div class="mt-8 border-t border-slate-200 pt-4">
+      <div class="flex justify-between font-bold text-slate-600 mb-2">
+        <span>🏆 個人最高紀錄</span>
+        <span id="bestScoreText" class="text-green-600">0 分</span>
+      </div>
+      <ul class="text-left max-h-40 overflow-y-auto m-0 p-0 list-none" id="historyBox"></ul>
+    </div>
+  </div>
+
+  <!-- 單人計時模式 -->
+  <div id="soloView" class="w-full max-w-lg hidden mt-4">
+    <div class="flex justify-between bg-white px-5 py-3 rounded-2xl font-black text-lg shadow-sm mb-4">
+      <span class="text-accent">⏳ 倒數: <span id="soloTimer">60</span>s</span>
+      <span class="text-primary">⭐️ 得分: <span id="soloScore">0</span></span>
+    </div>
+    <div class="text-center mb-6">
+      <div class="text-6xl font-black text-slate-800" id="soloQuestion">6 × 7</div>
+    </div>
+    <div class="grid grid-cols-3 gap-4" id="soloGrid"></div>
+  </div>
+
+  <!-- 雙人同機對戰 (全螢幕上下分割) -->
+  <div id="battleContainer" class="fixed inset-0 hidden flex flex-col z-50 bg-slate-100">
+    <!-- P1 (上方藍方，旋轉 180 度) -->
+    <div class="flex-1 p-4 flex flex-col justify-around items-center bg-blue-50 border-b-4 border-dashed border-slate-300 rotate-180-p1">
+      <div class="w-full flex justify-between items-center font-black">
+        <span class="text-blue-500 text-xl">🔵 藍方玩家</span>
+        <span class="text-2xl text-slate-700">目標: <span id="p1Score">0</span> / 5</span>
+      </div>
+      <div class="text-6xl font-black text-slate-800" id="p1Question">6 × 7</div>
+      <div class="grid grid-cols-4 gap-3 w-full max-w-md" id="p1Grid"></div>
+    </div>
+
+    <!-- P2 (下方紅方，正常視角) -->
+    <div class="flex-1 p-4 flex flex-col justify-around items-center bg-pink-50">
+      <div class="text-6xl font-black text-slate-800" id="p2Question">6 × 7</div>
+      <div class="grid grid-cols-4 gap-3 w-full max-w-md" id="p2Grid"></div>
+      <div class="w-full flex justify-between items-center font-black">
+        <span class="text-pink-500 text-xl">🔴 紅方玩家</span>
+        <span class="text-2xl text-slate-700">目標: <span id="p2Score">0</span> / 5</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 結算彈窗 -->
+  <div id="modalOverlay" class="fixed inset-0 bg-black/60 hidden flex items-center justify-center z-[100]">
+    <div class="bg-white p-8 rounded-3xl text-center max-w-sm w-[90%] shadow-2xl scale-100 transform transition-transform">
+      <div id="modalEmoji" class="text-6xl mb-4">🎉</div>
+      <h2 id="modalTitle" class="text-3xl font-black text-slate-800 mb-2">挑戰完成！</h2>
+      <p id="modalDetail" class="text-lg text-slate-600 mb-6 font-bold"></p>
+      <button class="w-full bg-green-500 text-white font-black text-xl py-3 rounded-2xl shadow-[0_4px_0_#16A34A] active-press" onclick="backToMenu()">回主選單 🏠</button>
+    </div>
+  </div>
+
+  <script>
+    // --- 核心狀態 ---
+    const ALL_FACTORS = [2, 3, 4, 5, 6, 7, 8, 9];
+    let selectedFactors = new Set([3, 6, 7, 9]);
+    let currentAns = 0;
+
+    // --- 音效系統 (使用 Web Audio API) ---
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    let audioCtx;
+    let bgMusicInterval = null;
+    let beatTick = 0;
+    
+    function initAudio() {
+      if (!audioCtx) audioCtx = new AudioContext();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    }
+
+    // 產生打擊/心跳聲效 (製造緊張感)
+    function playDrumBeat(freq = 100) {
+      try {
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.15);
+      } catch(e){}
+    }
+
+    // 基本回饋音效 (答對/答錯)
+    function beep(freq, duration, type="sine") {
+      try {
+        if (!audioCtx) return;
+        const o = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        o.type = type;
+        o.frequency.value = freq;
+        g.gain.setValueAtTime(0.2, audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+        o.connect(g);
+        g.connect(audioCtx.destination);
+        o.start();
+        o.stop(audioCtx.currentTime + duration);
+      } catch(e){}
+    }
+
+    function startBattleMusic() {
+      stopBattleMusic();
+      beatTick = 0;
+      bgMusicInterval = setInterval(() => {
+        if (beatTick % 4 === 0) playDrumBeat(130);
+        else if (beatTick % 4 === 1) playDrumBeat(90);
+        beatTick++;
+      }, 250);
+    }
+
+    function stopBattleMusic() {
+      if (bgMusicInterval) {
+        clearInterval(bgMusicInterval);
+        bgMusicInterval = null;
+      }
+    }
+
+    // --- 選單邏輯 ---
+    function initFactorSelector() {
+      const box = document.getElementById('factorSelector');
+      box.innerHTML = '';
+      ALL_FACTORS.forEach(num => {
+        const btn = document.createElement('div');
+        const isActive = selectedFactors.has(num);
+        btn.className = `py-3 rounded-xl text-2xl font-black cursor-pointer border-4 text-center transition-colors active-press ${isActive ? 'bg-green-100 border-green-500 text-green-700' : 'bg-slate-100 border-slate-300 text-slate-500'}`;
+        btn.textContent = num;
+        btn.onclick = () => {
+          if (selectedFactors.has(num)) {
+            if (selectedFactors.size > 1) selectedFactors.delete(num);
+          } else {
+            selectedFactors.add(num);
+          }
+          initFactorSelector();
+        };
+        box.appendChild(btn);
+      });
+    }
+    function setPreset(arr) { selectedFactors = new Set(arr); initFactorSelector(); }
+    function selectAll() { selectedFactors = new Set(ALL_FACTORS); initFactorSelector(); }
+
+    // --- 單人計時模式 ---
+    let soloTimer = null;
+    let soloSec = 60;
+    let soloScore = 0;
+    let soloLocked = false;
+
+    function startSoloMode() {
+      initAudio();
+      document.getElementById('menuView').classList.add('hidden');
+      document.getElementById('soloView').classList.remove('hidden');
+      soloSec = 60;
+      soloScore = 0;
+      soloLocked = false;
+      document.getElementById('soloScore').textContent = '0';
+      document.getElementById('soloTimer').textContent = soloSec;
+      
+      genSoloQuestion();
+      soloTimer = setInterval(() => {
+        soloSec--;
+        document.getElementById('soloTimer').textContent = soloSec;
+        if (soloSec <= 0) {
+          clearInterval(soloTimer);
+          finishSoloGame();
+        }
+      }, 1000);
+    }
+
+    function genSoloQuestion() {
+      const active = Array.from(selectedFactors);
+      const a = active[Math.floor(Math.random() * active.length)];
+      const b = Math.floor(Math.random() * 9) + 1;
+      currentAns = a * b;
+      document.getElementById('soloQuestion').textContent = `${a} × ${b}`;
+
+      const set = new Set([currentAns]);
+      while (set.size < 6) {
+        set.add(active[Math.floor(Math.random() * active.length)] * (Math.floor(Math.random() * 9) + 1));
+      }
+      const opts = Array.from(set).sort(() => Math.random() - 0.5);
+
+      const grid = document.getElementById('soloGrid');
+      grid.innerHTML = '';
+      opts.forEach(num => {
+        const btn = document.createElement('div');
+        btn.className = 'bg-white border-4 border-slate-300 rounded-2xl aspect-square flex flex-col items-center justify-center text-3xl font-black shadow-[0_5px_0_#CBD5E1] cursor-pointer active-press transition-colors';
+        btn.innerHTML = `<span class="text-2xl mb-1">🪰</span>${num}`;
+        btn.onpointerdown = () => {
+          if (soloLocked) return;
+          if (num === currentAns) {
+            beep(600, 0.1);
+            btn.classList.add('!bg-green-300', '!border-green-500');
+            soloScore += 10;
+            document.getElementById('soloScore').textContent = soloScore;
+            soloLocked = true;
+            setTimeout(() => { soloLocked = false; genSoloQuestion(); }, 300);
+          } else {
+            beep(180, 0.25, 'sawtooth');
+            btn.classList.add('!bg-red-200', '!border-red-500');
+            soloLocked = true;
+            setTimeout(() => { btn.classList.remove('!bg-red-200', '!border-red-500'); soloLocked = false; }, 800);
+          }
+        };
+        grid.appendChild(btn);
+      });
+    }
+
+    function finishSoloGame() {
+      saveSoloRecord(soloScore);
+      showModal("🎉 時間到！", `你的總得分是：${soloScore} 分！`, "⏱️");
+    }
+
+    function saveSoloRecord(score) {
+      const history = JSON.parse(localStorage.getItem('math_fly_history') || '[]');
+      const newRecord = { score, date: new Date().toLocaleDateString() };
+      history.unshift(newRecord);
+      if (history.length > 5) history.pop();
+      localStorage.setItem('math_fly_history', JSON.stringify(history));
+      loadHistory();
+    }
+
+    function loadHistory() {
+      const history = JSON.parse(localStorage.getItem('math_fly_history') || '[]');
+      const best = history.reduce((max, item) => Math.max(max, item.score), 0);
+      document.getElementById('bestScoreText').textContent = `${best} 分`;
+
+      const box = document.getElementById('historyBox');
+      box.innerHTML = history.length ? '' : '<li class="text-slate-400 text-center py-2">尚無紀錄，快來挑戰！</li>';
+      history.forEach((item, idx) => {
+        const li = document.createElement('li');
+        li.className = 'flex justify-between py-3 border-b border-slate-100 text-sm font-medium';
+        li.innerHTML = `<span class="text-slate-500">第 ${idx+1} 次 (${item.date})</span><strong class="text-slate-800 text-base">${item.score} 分</strong>`;
+        box.appendChild(li);
+      });
+    }
+
+    // --- 雙人對戰模式 ---
+    let p1Score = 0;
+    let p2Score = 0;
+    let battleRoundLocked = false;
+
+    function startBattleMode() {
+      initAudio();
+      document.getElementById('menuView').classList.add('hidden');
+      document.getElementById('battleContainer').classList.remove('hidden');
+      p1Score = 0;
+      p2Score = 0;
+      battleRoundLocked = false;
+      document.getElementById('p1Score').textContent = '0';
+      document.getElementById('p2Score').textContent = '0';
+      
+      startBattleMusic(); // 開始緊張節奏
+      nextBattleRound();
+    }
+
+    function nextBattleRound() {
+      battleRoundLocked = false;
+      const active = Array.from(selectedFactors);
+      const a = active[Math.floor(Math.random() * active.length)];
+      const b = Math.floor(Math.random() * 9) + 1;
+      currentAns = a * b;
+
+      document.getElementById('p1Question').textContent = `${a} × ${b}`;
+      document.getElementById('p2Question').textContent = `${a} × ${b}`;
+
+      const set = new Set([currentAns]);
+      while (set.size < 4) {
+        set.add(active[Math.floor(Math.random() * active.length)] * (Math.floor(Math.random() * 9) + 1));
+      }
+      const optsP1 = Array.from(set).sort(() => Math.random() - 0.5);
+      const optsP2 = Array.from(set).sort(() => Math.random() - 0.5);
+
+      renderBattleButtons('p1Grid', optsP1, 1);
+      renderBattleButtons('p2Grid', optsP2, 2);
+    }
+
+    function renderBattleButtons(containerId, options, playerNum) {
+      const box = document.getElementById(containerId);
+      box.innerHTML = '';
+      options.forEach(num => {
+        const btn = document.createElement('div');
+        btn.className = 'bg-white border-4 border-slate-300 rounded-2xl py-4 text-3xl font-black text-center shadow-[0_4px_0_#94A3B8] cursor-pointer active-press transition-all';
+        btn.textContent = num;
+        btn.onpointerdown = () => handleBattleHit(playerNum, num, btn);
+        box.appendChild(btn);
+      });
+    }
+
+    function handleBattleHit(playerNum, hitNum, elem) {
+      if (battleRoundLocked || elem.classList.contains('opacity-50')) return;
+
+      if (hitNum === currentAns) {
+        battleRoundLocked = true;
+        beep(700, 0.15);
+        
+        elem.classList.add('!bg-green-300', '!border-green-500', 'scale-105');
+
+        if (playerNum === 1) {
+          p1Score++;
+          document.getElementById('p1Score').textContent = p1Score;
+        } else {
+          p2Score++;
+          document.getElementById('p2Score').textContent = p2Score;
+        }
+
+        setTimeout(() => {
+          if (p1Score >= 5) {
+            stopBattleMusic();
+            triggerConfetti(1);
+            showModal("🔵 藍方勝利！", "恭喜藍方玩家率先搶下 5 分！", "🏆");
+          } else if (p2Score >= 5) {
+            stopBattleMusic();
+            triggerConfetti(2);
+            showModal("🔴 紅方勝利！", "恭喜紅方玩家率先搶下 5 分！", "🏆");
+          } else {
+            nextBattleRound();
+          }
+        }, 800);
+      } else {
+        beep(180, 0.2, 'sawtooth');
+        elem.classList.add('!bg-red-200', '!border-red-500', 'opacity-50', 'pointer-events-none');
+      }
+    }
+
+    function triggerConfetti(playerNum) {
+      // 判斷發射綵帶的位置與方向
+      const originY = playerNum === 1 ? 0 : 1; 
+      const angle = playerNum === 1 ? 270 : 90;
+      const colors = playerNum === 1 ? ['#3B82F6', '#60A5FA', '#93C5FD'] : ['#EC4899', '#F472B6', '#F9A8D4'];
+
+      confetti({
+        particleCount: 150,
+        spread: 100,
+        origin: { y: originY },
+        angle: angle,
+        colors: colors,
+        zIndex: 2000
+      });
+    }
+
+    // --- 視窗控制 ---
+    function showModal(title, msg, emoji="🎉") {
+      document.getElementById('modalEmoji').textContent = emoji;
+      document.getElementById('modalTitle').textContent = title;
+      document.getElementById('modalDetail').textContent = msg;
+      document.getElementById('modalOverlay').classList.remove('hidden');
+    }
+
+    function backToMenu() {
+      clearInterval(soloTimer);
+      stopBattleMusic();
+      document.getElementById('soloView').classList.add('hidden');
+      document.getElementById('battleContainer').classList.add('hidden');
+      document.getElementById('modalOverlay').classList.add('hidden');
+      document.getElementById('menuView').classList.remove('hidden');
+      loadHistory();
+    }
+
+    // 初始化
+    initFactorSelector();
+    loadHistory();
+  </script>
+</body>
+</html>
